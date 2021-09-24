@@ -19,6 +19,9 @@ class ChatIntents:
     def __init__(self, message_embeddings, name):
         self.message_embeddings = message_embeddings
         self.name = name
+        self.best_params = None
+        self.best_clusters = None
+        self.trials = None
 
     def generate_clusters(self, n_neighbors, n_components,
                           min_cluster_size, min_samples=None,
@@ -83,60 +86,195 @@ class ChatIntents:
 
         return result_df.sort_values(by='cost')
 
+    def _objective(self, params, label_lower, label_upper):
 
-def objective(params, embeddings, label_lower, label_upper):
+        clusters = self.generate_clusters(n_neighbors=params['n_neighbors'],
+                                          n_components=params['n_components'],
+                                          min_cluster_size=params['min_cluster_size'],
+                                          min_samples=params['min_samples'],
+                                          random_state=params['random_state'])
 
-    clusters = generate_clusters(embeddings,
-                                 n_neighbors=params['n_neighbors'],
-                                 n_components=params['n_components'],
-                                 min_cluster_size=params['min_cluster_size'],
-                                 min_samples=params['min_samples'],
-                                 random_state=params['random_state'])
+        label_count, cost = self.score_clusters(clusters, prob_threshold=0.05)
 
-    label_count, cost = score_clusters(clusters, prob_threshold=0.05)
+        # 15% penalty on the cost function if outside the desired range
+        # for the number of clusters
+        if (label_count < label_lower) | (label_count > label_upper):
+            penalty = 0.15
+        else:
+            penalty = 0
 
-    # 15% penalty on the cost function if outside the desired range of groups
-    if (label_count < label_lower) | (label_count > label_upper):
-        penalty = 0.15
-    else:
-        penalty = 0
+        loss = cost + penalty
 
-    loss = cost + penalty
+        return {'loss': loss, 'label_count': label_count, 'status': STATUS_OK}
 
-    return {'loss': loss, 'label_count': label_count, 'status': STATUS_OK}
+    def bayesian_search(self,
+                        space,
+                        label_lower,
+                        label_upper,
+                        max_evals=100):
 
+        trials = Trials()
+        fmin_objective = partial(self._objective,
+                                 label_lower=label_lower,
+                                 label_upper=label_upper)
 
-def bayesian_search(embeddings,
-                    space,
-                    label_lower,
-                    label_upper,
-                    max_evals=100):
+        best = fmin(fmin_objective,
+                    space=space,
+                    algo=tpe.suggest,
+                    max_evals=max_evals,
+                    trials=trials)
 
-    trials = Trials()
-    fmin_objective = partial(objective,
-                             embeddings=embeddings,
-                             label_lower=label_lower,
-                             label_upper=label_upper)
+        best_params = space_eval(space, best)
+        print('best:')
+        print(best_params)
+        print(f"label count: {trials.best_trial['result']['label_count']}")
 
-    best = fmin(fmin_objective,
-                space=space,
-                algo=tpe.suggest,
-                max_evals=max_evals,
-                trials=trials)
+        best_clusters = self.generate_clusters(n_neighbors=best_params['n_neighbors'],
+                                               n_components=best_params['n_components'],
+                                               min_cluster_size=best_params['min_cluster_size'],
+                                               min_samples=best_params['min_samples'],
+                                               random_state=best_params['random_state'])
 
-    best_params = space_eval(space, best)
-    print('best:')
-    print(best_params)
-    print(f"label count: {trials.best_trial['result']['label_count']}")
+        self.best_params = best_params
+        self.best_clusters = best_clusters
+        self.trials = trials
+        # return best_params, best_clusters, trials
 
-    best_clusters = generate_clusters(embeddings,
-                                      n_neighbors=best_params['n_neighbors'],
-                                      n_components=best_params['n_components'],
-                                      min_cluster_size=best_params['min_cluster_size'],
-                                      min_samples=best_params['min_samples'],
-                                      random_state=best_params['random_state'])
+    def plot_clusters(self, clustered_labels, n_neighbors=15, min_dist=0.1):
+        umap_reduce = (umap.UMAP(n_neighbors=n_neighbors,
+                                 n_components=2,
+                                 min_dist=min_dist,
+                                 # metric='cosine',
+                                 random_state=42)
+                           .fit_transform(self.message_embeddings)
+                      )
 
-    return best_params, best_clusters, trials
+        point_size = 100.0 / np.sqrt(self.message_embeddings.shape[0])
+
+        result = pd.DataFrame(umap_reduce, columns=['x', 'y'])
+        result['labels'] = clustered_labels.labels_
+
+        fig, ax = plt.subplots(figsize=(14, 8))
+        noise = result[result.labels == -1]
+        clustered = result[result.labels != -1]
+        plt.scatter(noise.x, noise.y, color='lightgrey', s=point_size)
+        plt.scatter(clustered.x, clustered.y, c=clustered.labels,
+                    s=point_size, cmap='jet')
+        plt.colorbar()
+        plt.show()
+
+    @staticmethod
+    def _get_group(df, category_col, category):
+
+        single_category = (df[df[category_col] == category]
+                           .reset_index(drop=True)
+                           )
+
+        return single_category
+
+    @staticmethod
+    def _most_common(lst, n_words):
+
+        counter = collections.Counter(lst)
+
+        return counter.most_common(n_words)
+
+    def _extract_labels(self, category_docs, print_word_counts=False):
+        """
+        Argument:
+        category_docs: list of documents, all from the same category or clustering
+        """
+        verbs = []
+        dobjs = []
+        nouns = []
+        adjs = []
+
+        verb = ''
+        dobj = ''
+        noun1 = ''
+        noun2 = ''
+
+        nlp = spacy.load("en_core_web_sm")
+
+        for i in range(len(category_docs)):
+            doc = nlp(category_docs[i])
+            for token in doc:
+                if token.is_stop is False:
+                    if token.dep_ == 'ROOT':
+                        verbs.append(token.text.lower())
+
+                    elif token.dep_ == 'dobj':
+                        dobjs.append(token.lemma_.lower())
+
+                    elif token.pos_ == 'NOUN':
+                        nouns.append(token.lemma_.lower())
+
+                    elif token.pos_ == 'ADJ':
+                        adjs.append(token.lemma_.lower())
+
+        if print_word_counts:
+            for word_lst in [verbs, dobjs, nouns, adjs]:
+                counter = collections.Counter(word_lst)
+                print(counter)
+
+        if len(verbs) > 0:
+            verb = self._most_common(verbs, 1)[0][0]
+
+        if len(dobjs) > 0:
+            dobj = self._most_common(dobjs, 1)[0][0]
+
+        if len(nouns) > 0:
+            noun1 = self._most_common(nouns, 1)[0][0]
+
+        if len(set(nouns)) > 1:
+            noun2 = self._most_common(nouns, 2)[1][0]
+
+        words = [verb, dobj]
+
+        for word in [noun1, noun2]:
+            if word not in words:
+                words.append(word)
+
+        if '' in words:
+            words.remove('')
+
+        label = '_'.join(words)
+
+        return label
+
+    def apply_and_summarize_labels(self, df_data):
+
+        # create a dataframe with cluster numbers applied to each doc
+        category_col = 'label_' + self.name
+        df_clustered = df_data.copy()
+        df_clustered[category_col] = self.best_clusters.labels_
+
+        numerical_labels = df_clustered[category_col].unique()
+
+        # create dictionary mapping the numerical category to the generated label
+        label_dict = {}
+        for label in numerical_labels:
+            current_category = list(self._get_group(df_clustered, category_col,
+                                                    label)['text'])
+            label_dict[label] = self._extract_labels(current_category)
+
+        # create summary dataframe of numerical labels and counts
+        df_summary = (df_clustered.groupby(category_col)['text'].count()
+                      .reset_index()
+                      .rename(columns={'text': 'count'})
+                      .sort_values('count', ascending=False))
+
+        # apply generated labels
+        df_summary['label'] = df_summary.apply(lambda x:
+                                               label_dict[x[category_col]],
+                                               axis=1)
+
+        labeled_docs = pd.merge(df_clustered,
+                                df_summary[[category_col, 'label']],
+                                on=category_col,
+                                how='left')
+
+        return df_summary, labeled_docs
 
 
 def combine_results(data_df, cluster_dict):
@@ -165,128 +303,6 @@ def comparison_table(model_dict, results_df):
     comparison_df = pd.DataFrame(summary, columns=['Model', 'ARI', 'NMI'])
 
     return comparison_df.sort_values(by='NMI', ascending=False)
-
-
-def plot_clusters(embeddings, clusters, n_neighbors=15, min_dist=0.1):
-    umap_data = umap.UMAP(n_neighbors=n_neighbors,
-                          n_components=2,
-                          min_dist=min_dist,
-                          # metric='cosine',
-                          random_state=42).fit_transform(embeddings)
-
-    point_size = 100.0 / np.sqrt(embeddings.shape[0])
-
-    result = pd.DataFrame(umap_data, columns=['x', 'y'])
-    result['labels'] = clusters.labels_
-
-    fig, ax = plt.subplots(figsize=(14, 8))
-    outliers = result[result.labels == -1]
-    clustered = result[result.labels != -1]
-    plt.scatter(outliers.x, outliers.y, color='lightgrey', s=point_size)
-    plt.scatter(clustered.x, clustered.y, c=clustered.labels,
-                s=point_size, cmap='jet')
-    plt.colorbar()
-    plt.show()
-
-
-def get_group(df, category_col, category):
-
-    single_category = df[df[category_col] == category].reset_index(drop=True)
-
-    return single_category
-
-
-def most_common(lst, n_words):
-    counter = collections.Counter(lst)
-
-    return counter.most_common(n_words)
-
-
-def extract_labels(category_docs, print_word_counts=False):
-    """
-    Argument:
-    category_docs: list of documents, all from the same category or clustering
-    """
-    verbs = []
-    dobjs = []
-    nouns = []
-    adjs = []
-
-    verb = ''
-    dobj = ''
-    noun1 = ''
-    noun2 = ''
-
-    nlp = spacy.load("en_core_web_sm")
-
-    for i in range(len(category_docs)):
-        doc = nlp(category_docs[i])
-        for token in doc:
-            if token.is_stop is False:
-                if token.dep_ == 'ROOT':
-                    verbs.append(token.text.lower())
-
-                elif token.dep_ == 'dobj':
-                    dobjs.append(token.lemma_.lower())
-
-                elif token.pos_ == 'NOUN':
-                    nouns.append(token.lemma_.lower())
-
-                elif token.pos_ == 'ADJ':
-                    adjs.append(token.lemma_.lower())
-
-    if print_word_counts:
-        for word_lst in [verbs, dobjs, nouns, adjs]:
-            counter = collections.Counter(word_lst)
-            print(counter)
-
-    if len(verbs) > 0:
-        verb = most_common(verbs, 1)[0][0]
-
-    if len(dobjs) > 0:
-        dobj = most_common(dobjs, 1)[0][0]
-
-    if len(nouns) > 0:
-        noun1 = most_common(nouns, 1)[0][0]
-
-    if len(set(nouns)) > 1:
-        noun2 = most_common(nouns, 2)[1][0]
-
-    words = [verb, dobj]
-
-    for word in [noun1, noun2]:
-        if word not in words:
-            words.append(word)
-
-    if '' in words:
-        words.remove('')
-
-    label = '_'.join(words)
-
-    return label
-
-
-def apply_and_summarize_labels(df, category_col):
-    numerical_labels = df[category_col].unique()
-
-    # create dictionary of the numerical category to the generated label
-    label_dict = {}
-    for label in numerical_labels:
-        current_category = list(get_group(df, category_col, label)['text'])
-        label_dict[label] = extract_labels(current_category)
-
-    # create summary dataframe of numerical labels and counts
-    summary_df = (df.groupby(category_col)['text'].count()
-                    .reset_index()
-                    .rename(columns={'text': 'count'})
-                    .sort_values('count', ascending=False))
-
-    # apply generated labels
-    summary_df['label'] = summary_df.apply(lambda x:
-                                           label_dict[x[category_col]],
-                                           axis=1)
-
-    return summary_df
 
 
 def combine_ground_truth(df_clusters, df_ground, key):
