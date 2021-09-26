@@ -140,7 +140,7 @@ class ChatIntents:
         self.trials = trials
         # return best_params, best_clusters, trials
 
-    def plot_clusters(self, clustered_labels, n_neighbors=15, min_dist=0.1):
+    def plot_best_clusters(self, n_neighbors=15, min_dist=0.1):
         umap_reduce = (umap.UMAP(n_neighbors=n_neighbors,
                                  n_components=2,
                                  min_dist=min_dist,
@@ -152,7 +152,7 @@ class ChatIntents:
         point_size = 100.0 / np.sqrt(self.message_embeddings.shape[0])
 
         result = pd.DataFrame(umap_reduce, columns=['x', 'y'])
-        result['labels'] = clustered_labels.labels_
+        result['labels'] = self.best_clusters.labels_
 
         fig, ax = plt.subplots(figsize=(14, 8))
         noise = result[result.labels == -1]
