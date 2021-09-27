@@ -277,32 +277,58 @@ class ChatIntents:
         return df_summary, labeled_docs
 
 
-def combine_results(data_df, cluster_dict):
+def combine_results(data_df, model_lst):
+    """
+    Arguments:
+        data_df: dataframe of original documents with associated ground truth
+                 labels
+        model_lst: list of model ChatIntent instances to include in evaluation
 
-    df = data_df.copy()
+    Returns:
+        df_combined: dataframe of all documents with labels from
+                     best clusters for each model
 
-    for key, value in cluster_dict.items():
-        df[key] = value.labels_
+    """
 
-    return df
+    df_combined = data_df.copy()
+
+    for model in model_lst:
+        label_name = 'label_' + model.name
+        df_combined[label_name] = model.best_clusters.labels_
+
+    return df_combined
 
 
-def comparison_table(model_dict, results_df):
+def evaluate_models(data_df, model_lst):
+    """
+    Arguments:
+        data_df: dataframe of original documents with associated ground truth
+                 labels
+        model_lst: list of model ChatIntent instances to include in evaluation
+
+    Returns:
+        labeled_docs_all_models: dataframe of all documents with labels from
+                                 best clusters for each model
+
+    """
+
+    df_combined = combine_results(data_df, model_lst)
+
     summary = []
 
-    for key, value in model_dict.items():
-        ground_labels = results_df['category'].values
-        clustered_labels = results_df[value].values
+    for model in model_lst:
+        ground_labels = df_combined['category'].values
+        clustered_labels = df_combined['label_' + model.name].values
 
         ari = np.round(adjusted_rand_score(ground_labels,
                                            clustered_labels), 3)
         nmi = np.round(normalized_mutual_info_score(ground_labels,
                                                     clustered_labels), 3)
-        summary.append([key, ari, nmi])
+        summary.append([model.name, ari, nmi])
 
-    comparison_df = pd.DataFrame(summary, columns=['Model', 'ARI', 'NMI'])
+    df_evaluation = pd.DataFrame(summary, columns=['Model', 'ARI', 'NMI'])
 
-    return comparison_df.sort_values(by='NMI', ascending=False)
+    return df_evaluation.sort_values(by='NMI', ascending=False), df_combined
 
 
 def combine_ground_truth(df_clusters, df_ground, key):
