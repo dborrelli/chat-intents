@@ -277,7 +277,7 @@ class ChatIntents:
         return df_summary, labeled_docs
 
 
-def combine_results(data_df, model_lst):
+def _combine_results(data_df, model_lst):
     """
     Arguments:
         data_df: dataframe of original documents with associated ground truth
@@ -312,7 +312,7 @@ def evaluate_models(data_df, model_lst):
 
     """
 
-    df_combined = combine_results(data_df, model_lst)
+    df_combined = _combine_results(data_df, model_lst)
 
     summary = []
 
@@ -331,12 +331,10 @@ def evaluate_models(data_df, model_lst):
     return df_evaluation.sort_values(by='NMI', ascending=False), df_combined
 
 
-def combine_ground_truth(df_clusters, df_ground, key):
-    df_combined = pd.merge(df_clusters, df_ground, on=key, how='left')
-    return df_combined
+def top_cluster_category(df_clusters, df_ground, key, df_summary):
 
+    df_label = pd.merge(df_clusters, df_ground, on=key, how='left')
 
-def get_top_category(df_label, df_summary):
     df_label_ground = (df_label.groupby('label')
                        .agg(top_ground_category=('category',
                                                  lambda x:
