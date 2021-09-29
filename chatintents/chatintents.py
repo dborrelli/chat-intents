@@ -6,9 +6,8 @@ import numpy as np
 import pandas as pd
 import hdbscan
 import umap
-from tqdm.notebook import tqdm, trange
-from hyperopt import fmin, tpe, hp, STATUS_OK, space_eval, Trials
-
+from tqdm.notebook import trange
+from hyperopt import fmin, tpe, STATUS_OK, space_eval, Trials
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.metrics.cluster import adjusted_rand_score
 import matplotlib.pyplot as plt
@@ -22,10 +21,51 @@ class ChatIntents:
         self.best_params = None
         self.best_clusters = None
         self.trials = None
+        """
+        ChatIntents initialization
 
-    def generate_clusters(self, n_neighbors, n_components,
-                          min_cluster_size, min_samples=None,
+        Arguments:
+            message_embeddings: numpy array of document embeddings created
+                                using desired model for class instance
+            name: string short name (no spaces) to be used for columnn
+                  identifiers
+            best_params: UMAP + HDBSCAN hyperparameters associated with
+                         the best performance after performing bayesian search
+                         using 'bayesian_search' method
+            best_clusters: HDBSCAN clusters and labels associated with
+                           the best performance after performing baysiean
+                           search using 'bayesian_search' method
+            trials: hyperopt trials saved from bayesian search using
+                    'bayesian_search' method
+        """
+
+    def generate_clusters(self,
+                          n_neighbors,
+                          n_components,
+                          min_cluster_size,
+                          min_samples=None,
                           random_state=None):
+        """
+        Generate HDBSCAN clusters from UMAP embeddings of instance message
+        embeddings
+
+        Arguments:
+            n_neighbors: float, UMAP n_neighbors parameter representing the
+                         size of local neighborhood (in terms of number of
+                         neighboring sample points) used
+            n_components: int, UMAP n_components parameter representing
+                          dimension of the space to embed into
+            min_cluster_size: int, HDBSCAN parameter minimum size of clusters
+            min_samples: int, HDBSCAN parameter representing the number of
+                         samples in a neighbourhood for a point to be
+                         considered a core point
+            random_state: int, random seed to use in UMAP process
+
+        Returns:
+            clusters: HDBSCAN clustering object storing results of fit
+                      to instance message embeddings
+
+        """
 
         umap_embeddings = (umap.UMAP(n_neighbors=n_neighbors,
                                      n_components=n_components,
@@ -45,8 +85,17 @@ class ChatIntents:
     @staticmethod
     def score_clusters(clusters, prob_threshold=0.05):
         """
-        Returns the label count and cost of a given cluster supplied from running
-        hdbscan
+        Returns the label count and cost of a given clustering
+
+        Arguments:
+            clusters: HDBSCAN clustering object
+            prob_threshold: float, probability threshold to use for deciding
+                            what cluster labels are considered low confidence
+
+        Returns:
+            label_count: int, number of unique cluster labels, including noise
+            cost: float, fraction of data points whose cluster assignment has
+                  a probability below cutoff threshold
         """
 
         cluster_labels = clusters.labels_
@@ -58,6 +107,20 @@ class ChatIntents:
         return label_count, cost
 
     def random_search(self, space, num_evals):
+        """
+        Randomly search parameter space of clustering pipeline
+
+        Arguments:
+            space: dict, contains keys for 'n_neighbors', 'n_components',
+                   'min_cluster_size' and 'min_samples' and values with
+                   corresponding lists or ranges of parameters to search
+            num_evals: int, number of random parameter combinations to try
+
+        Returns:
+            df_result: pandas dataframe containing info on each evaluation
+                       performed, including run_id, parameters used, label
+                       count, and cost
+        """
 
         results = []
 
@@ -73,20 +136,38 @@ class ChatIntents:
                                               min_samples=min_samples,
                                               random_state=42)
 
-            label_count, cost = self.score_clusters(clusters, prob_threshold=0.05)
+            label_count, cost = self.score_clusters(clusters,
+                                                    prob_threshold=0.05)
 
             results.append([i, n_neighbors, n_components, min_cluster_size,
                             min_samples, label_count, cost])
 
-        result_df = pd.DataFrame(results,
+        df_result = pd.DataFrame(results,
                                  columns=['run_id', 'n_neighbors',
                                           'n_components', 'min_cluster_size',
                                           'min_samples', 'label_count', 'cost']
                                  )
 
-        return result_df.sort_values(by='cost')
+        return df_result.sort_values(by='cost')
 
     def _objective(self, params, label_lower, label_upper):
+        """
+        Objective function for hyperopt to minimize
+
+        Arguments:
+            params: dict, contains keys for 'n_neighbors', 'n_components',
+                   'min_cluster_size', 'min_samples', 'random_state' and
+                   their values to use for evaluation
+            label_lower: int, lower end of range of number of expected clusters
+            label_upper: int, upper end of range of number of expected clusters
+
+        Returns:
+            loss: cost function result incorporating penalties for falling
+                  outside desired range for number of clusters
+            label_count: int, number of unique cluster labels, including noise
+            status: string, hypoeropt status
+
+        """
 
         clusters = self.generate_clusters(n_neighbors=params['n_neighbors'],
                                           n_components=params['n_components'],
@@ -112,6 +193,27 @@ class ChatIntents:
                         label_lower,
                         label_upper,
                         max_evals=100):
+        """
+        Perform bayesian search on hyperparameter space using hyperopt
+
+        Arguments:
+            space: dict, contains keys for 'n_neighbors', 'n_components',
+                   'min_cluster_size', 'min_samples', and 'random_state' and
+                   values that use built-in hyperopt functions to define
+                   search spaces for each
+            label_lower: int, lower end of range of number of expected clusters
+            label_upper: int, upper end of range of number of expected clusters
+            max_evals: int, maximum number of parameter combinations to try
+
+        Saves the following to instance variables:
+            best_params: dict, contains keys for 'n_neighbors', 'n_components',
+                   'min_cluster_size', 'min_samples', and 'random_state' and
+                   values associated with lowest cost scenario tested
+            best_clusters: HDBSCAN object associated with lowest cost scenario
+                           tested
+            trials: hyperopt trials object for search
+
+        """
 
         trials = Trials()
         fmin_objective = partial(self._objective,
@@ -141,13 +243,24 @@ class ChatIntents:
         # return best_params, best_clusters, trials
 
     def plot_best_clusters(self, n_neighbors=15, min_dist=0.1):
+        """
+        Reduce dimensionality of best clusters and plot in 2D using instance
+        variable result of running bayesian_search
+
+        Arguments:
+            n_neighbors: float, UMAP hyperparameter n_neighbors
+            min_dist: float, UMAP hyperparameter min_dist for effective
+                      minimum distance between embedded points
+
+        """
+
         umap_reduce = (umap.UMAP(n_neighbors=n_neighbors,
                                  n_components=2,
                                  min_dist=min_dist,
                                  # metric='cosine',
                                  random_state=42)
                            .fit_transform(self.message_embeddings)
-                      )
+                       )
 
         point_size = 100.0 / np.sqrt(self.message_embeddings.shape[0])
 
@@ -165,6 +278,20 @@ class ChatIntents:
 
     @staticmethod
     def _get_group(df, category_col, category):
+        """
+        Return single category of documents with known labels
+
+        Arguments:
+            df: pandas dataframe of documents and associated ground truth
+                labels
+            category_col: str, name of column with document labels
+            category: str, single document label of interest
+
+        Returns:
+            single_category: pandas dataframe with only documents from a
+                             single category of interest
+
+        """
 
         single_category = (df[df[category_col] == category]
                            .reset_index(drop=True)
@@ -174,16 +301,39 @@ class ChatIntents:
 
     @staticmethod
     def _most_common(lst, n_words):
+        """
+        Return most common n words in list of words
+
+        Arguments:
+            lst: list of words
+            n_words: int, number of top words by frequency to return
+
+        Returns:
+            counter.most_common(n_words): a list of the n most common elements
+                                          and their counts from the most
+                                          common to the least
+
+        """
 
         counter = collections.Counter(lst)
 
         return counter.most_common(n_words)
 
-    def _extract_labels(self, category_docs, print_word_counts=False):
+    def _extract_labels(self, category_docs):
         """
+        Extract labels from documents in the same cluster by concatenating
+        most common verbs, ojects, and nouns
+
         Argument:
-        category_docs: list of documents, all from the same category or clustering
+            category_docs: list of documents, all from the same category or
+                        clustering
+
+        Returns:
+            label: str, group label derived from concatentating most common
+                   verb, object, and two most common nouns
+
         """
+
         verbs = []
         dobjs = []
         nouns = []
@@ -212,11 +362,6 @@ class ChatIntents:
                     elif token.pos_ == 'ADJ':
                         adjs.append(token.lemma_.lower())
 
-        if print_word_counts:
-            for word_lst in [verbs, dobjs, nouns, adjs]:
-                counter = collections.Counter(word_lst)
-                print(counter)
-
         if len(verbs) > 0:
             verb = self._most_common(verbs, 1)[0][0]
 
@@ -231,6 +376,7 @@ class ChatIntents:
 
         words = [verb, dobj]
 
+        # ensures duplicated words aren't included
         for word in [noun1, noun2]:
             if word not in words:
                 words.append(word)
@@ -243,6 +389,21 @@ class ChatIntents:
         return label
 
     def apply_and_summarize_labels(self, df_data):
+        """
+        Assign groups to original documents and provide group counts
+
+        Arguments:
+            df_data: pandas dataframe of original documents of interest to 
+                     cluster
+
+        Returns:
+            df_summary: pandas dataframe with model cluster assignment, number
+                        of documents in each cluster and derived labels
+            labeled_docs: pandas dataframe with model cluster assignment and
+                          associated dervied label applied to each document in
+                          original corpus
+
+        """
 
         # create a dataframe with cluster numbers applied to each doc
         category_col = 'label_' + self.name
