@@ -393,7 +393,7 @@ class ChatIntents:
         Assign groups to original documents and provide group counts
 
         Arguments:
-            df_data: pandas dataframe of original documents of interest to 
+            df_data: pandas dataframe of original documents of interest to
                      cluster
 
         Returns:
@@ -412,7 +412,8 @@ class ChatIntents:
 
         numerical_labels = df_clustered[category_col].unique()
 
-        # create dictionary mapping the numerical category to the generated label
+        # create dictionary mapping the numerical category to the generated
+        # label
         label_dict = {}
         for label in numerical_labels:
             current_category = list(self._get_group(df_clustered, category_col,
@@ -438,11 +439,13 @@ class ChatIntents:
         return df_summary, labeled_docs
 
 
-def _combine_results(data_df, model_lst):
+def _combine_results(df_ground, model_lst):
     """
+    Returns dataframe of all documents and each model's assigned cluster
+
     Arguments:
-        data_df: dataframe of original documents with associated ground truth
-                 labels
+        df_ground: dataframe of original documents with associated ground truth
+                   labels
         model_lst: list of model ChatIntent instances to include in evaluation
 
     Returns:
@@ -451,7 +454,7 @@ def _combine_results(data_df, model_lst):
 
     """
 
-    df_combined = data_df.copy()
+    df_combined = df_ground.copy()
 
     for model in model_lst:
         label_name = 'label_' + model.name
@@ -460,20 +463,25 @@ def _combine_results(data_df, model_lst):
     return df_combined
 
 
-def evaluate_models(data_df, model_lst):
+def evaluate_models(df_ground, model_lst):
     """
+    Returns a table summarizing each model's performance compared to ground
+    truth labels and also labels all docs for each model being evaluated
+
     Arguments:
-        data_df: dataframe of original documents with associated ground truth
-                 labels
+        df_ground: dataframe of original documents with associated ground truth
+                   labels
         model_lst: list of model ChatIntent instances to include in evaluation
 
     Returns:
-        labeled_docs_all_models: dataframe of all documents with labels from
-                                 best clusters for each model
+        df_evaluation: dataframe with each row including a model name and
+                       calculated ARI and NMI
+        df_combined: dataframe of all documents with labels from
+                     best clusters for each model
 
     """
 
-    df_combined = _combine_results(data_df, model_lst)
+    df_combined = _combine_results(df_ground, model_lst)
 
     summary = []
 
@@ -493,6 +501,30 @@ def evaluate_models(data_df, model_lst):
 
 
 def top_cluster_category(df_clusters, df_ground, key, df_summary):
+    """
+    Returns a dataframe comparing a single model's results to ground truth
+    label to evalute cluster compositions and derived label relative to labels
+    and counts of most commmon ground truth category
+
+    Arguments:
+        df_clusters: pandas dataframe with model cluster assignment and
+                     associated dervied label applied to each document in
+                     original corpus (labeled_docs result from
+                     `apply_and_summarize_labels`)
+        df_ground: dataframe of original documents with associated ground truth
+                   labels
+        key: str, column name to use for joining tables corresponding to
+             document text
+        df_summary: pandas dataframe with model cluster assignment, number
+                    of documents in each cluster and derived labels
+                    (df_summary result from `apply_and_summarize_labels`)
+
+    Returns:
+        df_result: pandas dataframe with each row containing information on
+                   each cluster identified by this model, including count,
+                   extracted label, most represented ground truth label name,
+                   count and percentage of that group
+    """
 
     df_label = pd.merge(df_clusters, df_ground, on=key, how='left')
 
