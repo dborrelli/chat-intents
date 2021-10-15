@@ -344,7 +344,14 @@ class ChatIntents:
         noun1 = ''
         noun2 = ''
 
-        nlp = spacy.load("en_core_web_sm")
+        try:
+            nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            print("Downloading language model for the spaCy dependency parser\n"
+                  "(only required the first time this is run)\n")
+            from spacy.cli import download
+            download("en_core_web_sm")
+            nlp = spacy.load("en_core_web_sm")
 
         for i in range(len(category_docs)):
             doc = nlp(category_docs[i])
@@ -493,9 +500,21 @@ def evaluate_models(df_ground, model_lst):
                                            clustered_labels), 3)
         nmi = np.round(normalized_mutual_info_score(ground_labels,
                                                     clustered_labels), 3)
-        summary.append([model.name, ari, nmi])
+        loss = model.trials.best_trial['result']['loss']
+        label_count = model.trials.best_trial['result']['label_count']
+        n_neighbors = model.best_params['n_neighbors']
+        n_components = model.best_params['n_components']
+        min_cluster_size = model.best_params['min_cluster_size']
+        random_state = model.best_params['random_state']
+        summary.append([model.name, ari, nmi, loss, label_count, n_neighbors,
+                        n_components, min_cluster_size, random_state])
 
-    df_evaluation = pd.DataFrame(summary, columns=['Model', 'ARI', 'NMI'])
+    df_evaluation = pd.DataFrame(summary, columns=['Model', 'ARI', 'NMI', 
+                                                   'loss', 'label_count',
+                                                   'n_neighbors', 
+                                                   'n_components',
+                                                   'min_cluster_size',
+                                                   'random_state'])
 
     return df_evaluation.sort_values(by='NMI', ascending=False), df_combined
 
