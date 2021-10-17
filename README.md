@@ -114,11 +114,11 @@ df_summary, labeled_docs = model.apply_and_summarize_labels(docs[['text']])
 ```
 This yields two results. The `df_summary` dataframe summarizing the count and descriptive label of each group:
 
-![alt text](images/table_extracted_labels.png)
+![alt text](https://github.com/dborrelli/chat-intents/blob/main/images/table_extracted_labels.png)
 
 and the `labeled_docs` dataframe with each document in the dataset and it's associated cluster number and descriptiive label:
 
-![alt text](images/labeled_docs.png)
+![alt text](https://github.com/dborrelli/chat-intents/blob/main/images/labeled_docs.png)
 
 ### Evaluating performance if ground truth is known
 Two methods are also supplied for evaluating and comparing the performance of different models if the ground truth labels happen to be known:
@@ -126,11 +126,13 @@ Two methods are also supplied for evaluating and comparing the performance of di
 ```
 models = [model_use, model_st1, model_st2, model_st3]
 
-df_comparison, labeled_docs_all_models = chatintents.evaluate_models(docs[['text', 'category']], models)
+df_comparison, labeled_docs_all_models = chatintents.evaluate_models(docs[['text', 
+                                                                           'category']],
+                                                                           models)
 ```
 An example `df_comparison` dataframe comparing model performance is shown below:
 
-![alt text](images/results_comparison.png)
+![alt text](https://github.com/dborrelli/chat-intents/blob/main/images/results_comparison.png)
 
 ## Tutorial
 See this [tutorial notebook](https://github.com/dborrelli/chat-intents/blob/main/notebooks/chatintents_tutorial.ipynb) for an example of using the `chatintents` package for comparing four different models on a dataset.
