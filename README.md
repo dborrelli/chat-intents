@@ -124,7 +124,7 @@ and the `labeled_docs` dataframe with each document in the dataset and it's asso
 Two methods are also supplied for evaluating and comparing the performance of different models if the ground truth labels happen to be known:
 
 ```
-models = [model_st1, model_st2]
+models = [model_use, model_st1, model_st2, model_st3]
 
 df_comparison, labeled_docs_all_models = chatintents.evaluate_models(docs[['text', 'category']], models)
 ```
