@@ -2,7 +2,7 @@
 
 ChatIntents provides a method for automatically clustering and applying descriptive group labels to short text documents containing dialogue intents.  It uses [UMAP](https://github.com/lmcinnes/umap) for performing dimensionality reduction on user-supplied document embeddings and [HDSBCAN](https://github.com/scikit-learn-contrib/hdbscan) for performing the clustering. Hyperparameters are automatically tuned by performing a Bayesian search (using [hyperopt](https://github.com/hyperopt/hyperopt)) on a constrained optimization of an objective function using user-supplied bounds.
 
-**See associated Medium post for additional description and motivation.**
+**See the associated [Medium post](https://towardsdatascience.com/clustering-sentence-embeddings-to-identify-intents-in-short-text-48d22d3bf02e) for additional description and motivation.**
 
 ## Installation
 
